@@ -2,8 +2,11 @@ package pdftex
 
 import (
 	"fmt"
+	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
+	"strings"
 	"text/template"
 	"time"
 
@@ -91,3 +94,61 @@ func createTmpFolderAndFile(filename string) (*os.File, string, error) {
 }
 
 func createFolderName() string { return "tmp" + fmt.Sprintf("%d", time.Now().UnixNano()) }
+
+func CompileLatexTemplateReader(templatename string, data interface{}, funcs template.FuncMap) (io.Reader, error) {
+	return compileTexTemplateReader("pdflatex", templatename, data, funcs)
+}
+
+func CompileXetexTemplateReader(templatename string, data interface{}, funcs template.FuncMap) (io.Reader, error) {
+	return compileTexTemplateReader("xelatex", templatename, data, funcs)
+}
+
+func compileTexTemplateReader(command, templatename string, data interface{}, funcs template.FuncMap) (io.Reader, error) {
+	tmpl, err := template.New(templatename).Funcs(funcs).ParseFiles(templatename)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not create template")
+	}
+
+	filename := "sourcefile"
+	f, foldername, err := createTmpFolderAndFile(filename)
+	if err != nil {
+		f.Close()
+		return nil, errors.Wrap(err, "could not create tmp folder")
+	}
+
+	if err := tmpl.Execute(f, data); err != nil {
+		f.Close()
+		return nil, errors.Wrap(err, "could not execute template")
+	}
+	f.Close()
+
+	return executeCompilationReader(filename, command, foldername)
+}
+
+func executeCompilationReader(filename, command, foldername string) (io.Reader, error) {
+	if err := os.Chdir(foldername); err != nil {
+		return nil, errors.Wrap(err, "could not cd tmp folder")
+	}
+
+	if err := exec.Command(command, filename+".tex").Run(); err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintf("could not %s file.tex", command))
+	}
+
+	if err := os.Chdir(".."); err != nil {
+		return nil, errors.Wrap(err, "could not cd ..")
+	}
+
+	f, err := os.Open(foldername + "/" + filename + ".pdf")
+	if err != nil {
+		return nil, errors.Wrap(err, "could not open final pdf")
+	}
+	defer f.Close()
+	defer os.RemoveAll(foldername)
+
+	b, err := ioutil.ReadAll(f)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not read pdf")
+	}
+
+	return strings.NewReader(string(b)), nil
+}
