@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 	"text/template"
 	"time"
@@ -94,6 +95,7 @@ func createTmpFolderAndFile(filename string) (*os.File, string, error) {
 }
 
 func createFolderName() string { return "tmp" + fmt.Sprintf("%d", time.Now().UnixNano()) }
+func createFileName() string   { return "sourcefile" + fmt.Sprintf("%d", time.Now().UnixNano()) }
 
 func CompileLatexTemplateReader(templatename string, data interface{}, funcs template.FuncMap) (io.Reader, error) {
 	return compileTexTemplateReader("pdflatex", templatename, data, funcs)
@@ -109,7 +111,7 @@ func compileTexTemplateReader(command, templatename string, data interface{}, fu
 		return nil, errors.Wrap(err, "could not create template")
 	}
 
-	filename := "sourcefile"
+	filename := createFileName()
 	f, foldername, err := createTmpFolderAndFile(filename)
 	if err != nil {
 		f.Close()
@@ -151,4 +153,42 @@ func executeCompilationReader(filename, command, foldername string) (io.Reader, 
 	}
 
 	return strings.NewReader(string(b)), nil
+}
+
+func CompileLatexFolder(folder string, template *template.Template, data interface{}) (io.Reader, error) {
+	return compileTexFolder("pdflatex", folder, template, data)
+}
+
+func CompileXetexFolder(folder string, template *template.Template, data interface{}) (io.Reader, error) {
+	return compileTexFolder("xelatex", folder, template, data)
+}
+
+func compileTexFolder(command, folder string, tmpl *template.Template, data interface{}) (io.Reader, error) {
+	filename := createFileName()
+	f, foldername, err := createTmpFolderAndFile(filename)
+	if err != nil {
+		f.Close()
+		return nil, errors.Wrap(err, "could not create tmp folder")
+	}
+
+	files, err := ioutil.ReadDir(folder)
+	if err != nil {
+		f.Close()
+		return nil, errors.Wrap(err, "could not read folder")
+	}
+
+	for _, file := range files {
+		if err := exec.Command("cp", path.Join(folder, file.Name()), foldername).Run(); err != nil {
+			f.Close()
+			return nil, errors.Wrap(err, "could not copy folder contents to tmp folder")
+		}
+	}
+
+	if err := tmpl.Execute(f, data); err != nil {
+		f.Close()
+		return nil, errors.Wrap(err, "could not execute template")
+	}
+	f.Close()
+
+	return executeCompilationReader(filename, command, foldername)
 }
