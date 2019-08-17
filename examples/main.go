@@ -19,4 +19,19 @@ func main() {
 	f, _ := os.Create("file.pdf")
 	defer f.Close()
 	io.Copy(f, r)
+
+	bareTex := `
+\documentclass[12pt]{article}
+
+\begin{document}
+    \section{Sample document 2}
+
+	Sample content\ldots
+
+\end{document}
+`
+	err = pdftex.New().Input(bareTex).Compile().Save("file2.pdf")
+	if err != nil {
+		log.Fatalln("Could not compile bare tex:", err)
+	}
 }
