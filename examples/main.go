@@ -25,4 +25,8 @@ func main() {
 	if err := pdftex.New().Data(data).Compile().Save("file2.pdf"); err != nil {
 		log.Fatalln("Could not compile folder:", err)
 	}
+
+	if err := pdftex.New().TemplatesFolder("templates2").CopyFiles().Compile().Save("file3.pdf"); err != nil {
+		log.Fatalln("Could not compile folder with files:", err)
+	}
 }
