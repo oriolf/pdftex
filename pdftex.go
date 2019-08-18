@@ -1,6 +1,7 @@
 package pdftex
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -22,6 +23,7 @@ type pdfGenerator struct {
 	funcs           template.FuncMap
 	data            interface{}
 	template        *template.Template
+	copyFiles       bool
 	input           string
 	output          string
 }
@@ -66,6 +68,16 @@ func (pdf *pdfGenerator) Data(data interface{}) *pdfGenerator {
 	return pdf
 }
 
+func (pdf *pdfGenerator) Template(tmpl *template.Template) *pdfGenerator {
+	pdf.template = tmpl
+	return pdf
+}
+
+func (pdf *pdfGenerator) CopyFiles() *pdfGenerator {
+	pdf.copyFiles = true
+	return pdf
+}
+
 func (pdf *pdfGenerator) Input(input string) *pdfGenerator {
 	pdf.input = input
 	return pdf
@@ -100,16 +112,19 @@ func (pdf *pdfGenerator) Compile() *pdfGenerator {
 		return pdf
 	}
 
-	if pdf.input != "" {
-		pdf.output, pdf.err = pdf.compileRawInput()
-		return pdf
+	if pdf.input == "" {
+		pdf.input, pdf.err = pdf.compileTemplate()
 	}
 
-	pdf.output, pdf.err = pdf.compileTemplate()
+	pdf.output, pdf.err = pdf.compileRawInput()
 	return pdf
 }
 
 func (pdf *pdfGenerator) compileRawInput() (string, error) {
+	if pdf.err != nil {
+		return "", pdf.err
+	}
+
 	foldername := createFolderName()
 	if err := os.Mkdir(foldername, os.ModePerm); err != nil {
 		return "", errors.Wrap(err, "could not mkdir tmp folder")
@@ -130,6 +145,19 @@ func (pdf *pdfGenerator) compileRawInput() (string, error) {
 }
 
 func (pdf *pdfGenerator) executeCompilationAndClean(foldername string) (string, error) {
+	if pdf.copyFiles {
+		files, err := ioutil.ReadDir(pdf.templatesFolder)
+		if err != nil {
+			return "", errors.Wrap(err, "could not read templates folder")
+		}
+
+		for _, file := range files {
+			if err := exec.Command("cp", filepath.Join(pdf.templatesFolder, file.Name()), foldername).Run(); err != nil {
+				return "", errors.Wrap(err, "could not copy templates folder contents to tmp folder")
+			}
+		}
+	}
+
 	if err := os.Chdir(foldername); err != nil {
 		return "", errors.Wrap(err, "could not cd tmp folder")
 	}
@@ -154,25 +182,25 @@ func (pdf *pdfGenerator) executeCompilationAndClean(foldername string) (string, 
 	return string(output), nil
 }
 
-// TODO implement
-func (pdf *pdfGenerator) compileTemplate() (string, error) { return "", errors.New("not implemented") }
-
-func CompileLatex(filename, text string) error { return compileTex(filename, text, "pdflatex") }
-func CompileXetex(filename, text string) error { return compileTex(filename, text, "xelatex") }
-
-func compileTex(filename, text, command string) error {
-	f, foldername, err := createTmpFolderAndFile(filename)
-	if err != nil {
-		return errors.Wrap(err, "could not create tmp folder")
+func (pdf *pdfGenerator) compileTemplate() (string, error) {
+	if pdf.err != nil {
+		return "", pdf.err
 	}
 
-	if _, err := f.Write([]byte(text)); err != nil {
-		f.Close()
-		return errors.Wrap(err, "could not write text to tex file")
+	if pdf.template == nil {
+		tmpl, err := template.New(pdf.templateName).Funcs(pdf.funcs).ParseFiles(filepath.Join(pdf.templatesFolder, pdf.templateName))
+		if err != nil {
+			return "", errors.Wrap(err, "could not create template")
+		}
+		pdf.template = tmpl
 	}
-	f.Close()
 
-	return executeCompilationAndClean(filename, command, foldername)
+	var buffer bytes.Buffer
+	if err := pdf.template.Execute(&buffer, pdf.data); err != nil {
+		return "", errors.Wrap(err, "could not execute template")
+	}
+
+	return buffer.String(), nil
 }
 
 func CompileLatexTemplate(filename, templatename string, data interface{}, funcs template.FuncMap) error {
@@ -239,36 +267,6 @@ func createTmpFolderAndFile(filename string) (*os.File, string, error) {
 
 func createFolderName() string { return "tmp" + fmt.Sprintf("%d", time.Now().UnixNano()) }
 func createFileName() string   { return "sourcefile" + fmt.Sprintf("%d", time.Now().UnixNano()) }
-
-func CompileLatexTemplateReader(templatename string, data interface{}, funcs template.FuncMap) (io.Reader, error) {
-	return compileTexTemplateReader("pdflatex", templatename, data, funcs)
-}
-
-func CompileXetexTemplateReader(templatename string, data interface{}, funcs template.FuncMap) (io.Reader, error) {
-	return compileTexTemplateReader("xelatex", templatename, data, funcs)
-}
-
-func compileTexTemplateReader(command, templatename string, data interface{}, funcs template.FuncMap) (io.Reader, error) {
-	tmpl, err := template.New(templatename).Funcs(funcs).ParseFiles(templatename)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not create template")
-	}
-
-	filename := createFileName()
-	f, foldername, err := createTmpFolderAndFile(filename)
-	if err != nil {
-		f.Close()
-		return nil, errors.Wrap(err, "could not create tmp folder")
-	}
-
-	if err := tmpl.Execute(f, data); err != nil {
-		f.Close()
-		return nil, errors.Wrap(err, "could not execute template")
-	}
-	f.Close()
-
-	return executeCompilationReader(filename, command, foldername)
-}
 
 func executeCompilationReader(filename, command, foldername string) (io.Reader, error) {
 	if err := os.Chdir(foldername); err != nil {
