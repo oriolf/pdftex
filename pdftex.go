@@ -15,7 +15,7 @@ import (
 
 type pdfGenerator struct {
 	err             error
-	command         command
+	command         Command
 	templatesFolder string
 	templateName    string
 	funcs           template.FuncMap
@@ -26,11 +26,11 @@ type pdfGenerator struct {
 	output          string
 }
 
-type command string
+type Command string
 
 const (
-	PDFLaTeX command = "pdflatex"
-	XeLaTeX  command = "xelatex"
+	PDFLaTeX Command = "pdflatex"
+	XeLaTeX  Command = "xelatex"
 )
 
 func New() *pdfGenerator {
@@ -41,7 +41,7 @@ func New() *pdfGenerator {
 	}
 }
 
-func (pdf *pdfGenerator) Command(c command) *pdfGenerator {
+func (pdf *pdfGenerator) Command(c Command) *pdfGenerator {
 	pdf.command = c
 	return pdf
 }
