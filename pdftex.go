@@ -156,21 +156,14 @@ func (pdf *pdfGenerator) executeCompilationAndClean(foldername string) (string, 
 		}
 	}
 
-	if err := os.Chdir(foldername); err != nil {
-		return "", errors.Wrap(err, "could not cd tmp folder")
-	}
-
-	if err := exec.Command(string(pdf.command), "file.tex").Run(); err != nil {
+	com := fmt.Sprintf("cd %s && %s file.tex", foldername, string(pdf.command))
+	if err := exec.Command("bash", "-c", com).Run(); err != nil {
 		return "", errors.Wrapf(err, "could not %s file.tex", pdf.command)
 	}
 
-	output, err := ioutil.ReadFile("file.pdf")
+	output, err := ioutil.ReadFile(filepath.Join(foldername, "file.pdf"))
 	if err != nil {
 		return "", errors.Wrap(err, "error reading file.pdf")
-	}
-
-	if err := os.Chdir(".."); err != nil {
-		return "", errors.Wrap(err, "could not cd ..")
 	}
 
 	if err := os.RemoveAll(foldername); err != nil {
