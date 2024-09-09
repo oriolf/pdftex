@@ -2,15 +2,15 @@ package pdftex
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"text/template"
 	"time"
-
-	"github.com/pkg/errors"
 )
 
 type pdfGenerator struct {
@@ -18,6 +18,7 @@ type pdfGenerator struct {
 	command         Command
 	templatesFolder string
 	templateName    string
+	fileSystem      fs.FS
 	funcs           template.FuncMap
 	data            interface{}
 	template        *template.Template
@@ -53,6 +54,11 @@ func (pdf *pdfGenerator) TemplatesFolder(folder string) *pdfGenerator {
 
 func (pdf *pdfGenerator) TemplateName(name string) *pdfGenerator {
 	pdf.templateName = name
+	return pdf
+}
+
+func (pdf *pdfGenerator) FileSystem(fsys fs.FS) *pdfGenerator {
+	pdf.fileSystem = fsys
 	return pdf
 }
 
@@ -94,12 +100,12 @@ func (pdf *pdfGenerator) Save(filename string) error {
 
 	f, err := os.Create(filename)
 	if err != nil {
-		return errors.Wrapf(err, "could not create file %s", filename)
+		return fmt.Errorf("could not create file %s: %w", filename, err)
 	}
 	defer f.Close()
 
 	if _, err := f.Write([]byte(pdf.output)); err != nil {
-		return errors.Wrap(err, "could not write output to file")
+		return fmt.Errorf("could not write output to file: %w", err)
 	}
 
 	return nil
@@ -125,17 +131,17 @@ func (pdf *pdfGenerator) compileRawInput() (string, error) {
 
 	foldername := createFolderName()
 	if err := os.Mkdir(foldername, os.ModePerm); err != nil {
-		return "", errors.Wrap(err, "could not mkdir tmp folder")
+		return "", fmt.Errorf("could not mkdir tmp folder: %w", err)
 	}
 
 	f, err := os.Create(filepath.Join(foldername, "file.tex"))
 	if err != nil {
-		return "", errors.Wrap(err, "could not create file.tex")
+		return "", fmt.Errorf("could not create file.tex: %w", err)
 	}
 
 	if _, err := f.Write([]byte(pdf.input)); err != nil {
 		f.Close()
-		return "", errors.Wrap(err, "could not write file.tex contents")
+		return "", fmt.Errorf("could not write file.tex contents: %w", err)
 	}
 	f.Close()
 
@@ -146,28 +152,28 @@ func (pdf *pdfGenerator) executeCompilationAndClean(foldername string) (string, 
 	if pdf.copyFiles {
 		files, err := ioutil.ReadDir(pdf.templatesFolder)
 		if err != nil {
-			return "", errors.Wrap(err, "could not read templates folder")
+			return "", fmt.Errorf("could not read templates folder: %w", err)
 		}
 
 		for _, file := range files {
 			if err := exec.Command("cp", filepath.Join(pdf.templatesFolder, file.Name()), foldername).Run(); err != nil {
-				return "", errors.Wrap(err, "could not copy templates folder contents to tmp folder")
+				return "", fmt.Errorf("could not copy templates folder contents to tmp folder: %w", err)
 			}
 		}
 	}
 
 	com := fmt.Sprintf("cd %s && %s file.tex", foldername, string(pdf.command))
 	if err := exec.Command("bash", "-c", com).Run(); err != nil {
-		return "", errors.Wrapf(err, "could not %s file.tex", pdf.command)
+		return "", fmt.Errorf("could not %s file.tex: %w", pdf.command, err)
 	}
 
 	output, err := ioutil.ReadFile(filepath.Join(foldername, "file.pdf"))
 	if err != nil {
-		return "", errors.Wrap(err, "error reading file.pdf")
+		return "", fmt.Errorf("error reading file.pdf: %w", err)
 	}
 
 	if err := os.RemoveAll(foldername); err != nil {
-		return "", errors.Wrap(err, "could not rm -r tmp folder")
+		return "", fmt.Errorf("could not rm -r tmp folder: %w", err)
 	}
 
 	return string(output), nil
@@ -179,16 +185,23 @@ func (pdf *pdfGenerator) compileTemplate() (string, error) {
 	}
 
 	if pdf.template == nil {
-		tmpl, err := template.New(pdf.templateName).Funcs(pdf.funcs).ParseFiles(filepath.Join(pdf.templatesFolder, pdf.templateName))
+		tmpl := template.New(pdf.templateName).Funcs(pdf.funcs)
+		templateName := filepath.Join(pdf.templatesFolder, pdf.templateName)
+		var err error
+		if pdf.fileSystem != nil {
+			tmpl, err = tmpl.ParseFS(pdf.fileSystem, templateName)
+		} else {
+			tmpl, err = tmpl.ParseFiles(templateName)
+		}
 		if err != nil {
-			return "", errors.Wrap(err, "could not create template")
+			return "", fmt.Errorf("could not create template: %w", err)
 		}
 		pdf.template = tmpl
 	}
 
 	var buffer bytes.Buffer
 	if err := pdf.template.Execute(&buffer, pdf.data); err != nil {
-		return "", errors.Wrap(err, "could not execute template")
+		return "", fmt.Errorf("could not execute template: %w", err)
 	}
 
 	return buffer.String(), nil

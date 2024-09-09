@@ -1,12 +1,16 @@
 package main
 
 import (
+	"embed"
 	"fmt"
 	"log"
 	"sync"
 
 	"github.com/oriolf/pdftex"
 )
+
+//go:embed templates3
+var templates3 embed.FS
 
 func main() {
 	bareTex := `
@@ -19,17 +23,21 @@ func main() {
 
 \end{document}
 `
-	if err := pdftex.New().Input(bareTex).Compile().Save("file.pdf"); err != nil {
+	if err := pdftex.New().Input(bareTex).Compile().Save("file_bare.pdf"); err != nil {
 		log.Fatalln("Could not compile bare tex:", err)
 	}
 
 	data := []string{"a", "b", "c"}
-	if err := pdftex.New().Data(data).Compile().Save("file2.pdf"); err != nil {
+	if err := pdftex.New().Data(data).Compile().Save("file_template.pdf"); err != nil {
 		log.Fatalln("Could not compile folder:", err)
 	}
 
-	if err := pdftex.New().TemplatesFolder("templates2").CopyFiles().Compile().Save("file3.pdf"); err != nil {
+	if err := pdftex.New().TemplatesFolder("templates2").CopyFiles().Compile().Save("file_template_2.pdf"); err != nil {
 		log.Fatalln("Could not compile folder with files:", err)
+	}
+
+	if err := pdftex.New().Data(data).TemplatesFolder("templates3").FileSystem(templates3).Compile().Save("file_embed.pdf"); err != nil {
+		log.Fatalln("Could not compile from embedded template:", err)
 	}
 
 	var wg sync.WaitGroup
